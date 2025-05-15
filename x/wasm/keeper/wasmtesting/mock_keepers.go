@@ -2,9 +2,10 @@ package wasmtesting
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
-	wasmvmtypes "github.com/CosmWasm/wasmvm/v2/types"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
 	clienttypes "github.com/cosmos/ibc-go/v10/modules/core/02-client/types"
 	channeltypes "github.com/cosmos/ibc-go/v10/modules/core/04-channel/types"
 	ibcexported "github.com/cosmos/ibc-go/v10/modules/core/exported"
@@ -137,7 +138,7 @@ func (m *IBCContractKeeperMock) LoadAsyncAckPacket(ctx context.Context, portID, 
 	key := portID + fmt.Sprint(len(channelID)) + channelID
 	packet, ok := m.packets[key]
 	if !ok {
-		return channeltypes.Packet{}, fmt.Errorf("packet not found")
+		return channeltypes.Packet{}, errors.New("packet not found")
 	}
 	return packet, nil
 }

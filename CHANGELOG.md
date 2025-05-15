@@ -2,7 +2,26 @@
 
 ## [Unreleased](https://github.com/CosmWasm/wasmd/tree/HEAD)
 
-[Full Changelog](https://github.com/CosmWasm/wasmd/compare/v0.54.0...HEAD)
+[Full Changelog](https://github.com/CosmWasm/wasmd/compare/v0.55.0...HEAD)
+
+ - chore: Change port prefix for IBCv2 messages to "wasm2" [\#2229](https://github.com/CosmWasm/wasmd/pull/2229)
+ - feat: IBCv2 timeout handler [\#2226](https://github.com/CosmWasm/wasmd/pull/2226)
+ - chore: source_client instead of channel_id in IBCv2 [\#2223](https://github.com/CosmWasm/wasmd/pull/2223)
+ - fix: Use seconds instead of nanoseconds for IBCv2 msg [\#2124](https://github.com/CosmWasm/wasmd/pull/2214)
+ - Register IBC v2 route and store the IBC v2 port in ContractInfo [\#2122](https://github.com/CosmWasm/wasmd/issues/2122)
+ - chore: Remove unused keepers [\#2190](https://github.com/CosmWasm/wasmd/pull/2190)
+ - Add IBC v2 SendPacket message encoding [\#2110](https://github.com/CosmWasm/wasmd/issues/2110)
+ - Remove IBC fee handling, as it is no longer supported by the IBC protocol [\#2254](https://github.com/CosmWasm/wasmd/pull/2254)
+
+## [v0.55.0](https://github.com/CosmWasm/wasmd/tree/v0.55.0) (2025-03-11)
+
+[Full Changelog](https://github.com/CosmWasm/wasmd/compare/v0.54.0...v0.55.0)
+
+- Bump ibc-go to v10.0.0 which removes IBC fees and capabilities [\#2157](https://github.com/CosmWasm/wasmd/pull/2157)
+- Add gas cost for UnpackAny [\#2115](https://github.com/CosmWasm/wasmd/pull/2115)
+- Make ContractAddrLen variable [\#2111](https://github.com/CosmWasm/wasmd/pull/2111)
+- Adjust SmartContractState query gas limit [\#2103](https://github.com/CosmWasm/wasmd/pull/2103)
+- Refactor build address command [\#2101](https://github.com/CosmWasm/wasmd/pull/2101)
 
 ## [v0.54.0](https://github.com/CosmWasm/wasmd/tree/v0.54.0) (2025-01-08)
 
@@ -284,7 +303,7 @@ below to learn more!
 ### Notable changes:
 
 - If you are not coming from v0.32.0, please see the "Notables changes" below, first. Especially about CometBFT.
-- IBC-Go is a new major version including the "hucklebery" security fix. See [v7.0.1](https://github.com/cosmos/ibc-go/releases/tag/v7.0.1).
+- IBC-Go is a new major version including the "huckleberry" security fix. See [v7.0.1](https://github.com/cosmos/ibc-go/releases/tag/v7.0.1).
 - SDK 47 support is a big step from the SDK 45 version supported before. Make sure to read the upgrade guide for the SDK
   before applying any changes. Links below.
 - Some advice from working with SDK 47 that may affect you, too:

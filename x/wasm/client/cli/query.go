@@ -10,7 +10,7 @@ import (
 	"os"
 	"strconv"
 
-	wasmvm "github.com/CosmWasm/wasmvm/v2"
+	wasmvm "github.com/CosmWasm/wasmvm/v3"
 	"github.com/spf13/cobra"
 	flag "github.com/spf13/pflag"
 
@@ -216,7 +216,7 @@ func GetCmdQueryCode() *cobra.Command {
 				return err
 			}
 			if len(res.Data) == 0 {
-				return fmt.Errorf("contract not found")
+				return errors.New("contract not found")
 			}
 
 			fmt.Printf("Downloading wasm code to %s\n", args[1])

@@ -3,12 +3,13 @@ package keeper
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
-	wasmvmtypes "github.com/CosmWasm/wasmvm/v2/types"
-	ibcfeetypes "github.com/cosmos/ibc-go/v10/modules/apps/29-fee/types"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
 	ibctransfertypes "github.com/cosmos/ibc-go/v10/modules/apps/transfer/types"
 	ibcclienttypes "github.com/cosmos/ibc-go/v10/modules/core/02-client/types"
 	channeltypes "github.com/cosmos/ibc-go/v10/modules/core/04-channel/types"
+	channeltypesv2 "github.com/cosmos/ibc-go/v10/modules/core/04-channel/v2/types"
 
 	errorsmod "cosmossdk.io/errors"
 	sdkmath "cosmossdk.io/math"
@@ -36,6 +37,7 @@ type (
 	AnyEncoder          func(ctx sdk.Context, sender sdk.AccAddress, msg *wasmvmtypes.AnyMsg) ([]sdk.Msg, error)
 	WasmEncoder         func(sender sdk.AccAddress, msg *wasmvmtypes.WasmMsg) ([]sdk.Msg, error)
 	IBCEncoder          func(ctx sdk.Context, sender sdk.AccAddress, contractIBCPortID string, msg *wasmvmtypes.IBCMsg) ([]sdk.Msg, error)
+	IBC2Encoder         func(sender sdk.AccAddress, msg *wasmvmtypes.IBC2Msg) ([]sdk.Msg, error)
 )
 
 type MessageEncoders struct {
@@ -43,6 +45,7 @@ type MessageEncoders struct {
 	Custom       func(sender sdk.AccAddress, msg json.RawMessage) ([]sdk.Msg, error)
 	Distribution func(sender sdk.AccAddress, msg *wasmvmtypes.DistributionMsg) ([]sdk.Msg, error)
 	IBC          func(ctx sdk.Context, sender sdk.AccAddress, contractIBCPortID string, msg *wasmvmtypes.IBCMsg) ([]sdk.Msg, error)
+	IBC2         func(sender sdk.AccAddress, msg *wasmvmtypes.IBC2Msg) ([]sdk.Msg, error)
 	Staking      func(sender sdk.AccAddress, msg *wasmvmtypes.StakingMsg) ([]sdk.Msg, error)
 	Any          func(ctx sdk.Context, sender sdk.AccAddress, msg *wasmvmtypes.AnyMsg) ([]sdk.Msg, error)
 	Wasm         func(sender sdk.AccAddress, msg *wasmvmtypes.WasmMsg) ([]sdk.Msg, error)
@@ -55,6 +58,7 @@ func DefaultEncoders(unpacker codectypes.AnyUnpacker, portSource types.ICS20Tran
 		Custom:       NoCustomMsg,
 		Distribution: EncodeDistributionMsg,
 		IBC:          EncodeIBCMsg(portSource),
+		IBC2:         EncodeIBCv2Msg,
 		Staking:      EncodeStakingMsg,
 		Any:          EncodeAnyMsg(unpacker),
 		Wasm:         EncodeWasmMsg,
@@ -77,6 +81,9 @@ func (e MessageEncoders) Merge(o *MessageEncoders) MessageEncoders {
 	}
 	if o.IBC != nil {
 		e.IBC = o.IBC
+	}
+	if o.IBC2 != nil {
+		e.IBC2 = o.IBC2
 	}
 	if o.Staking != nil {
 		e.Staking = o.Staking
@@ -103,6 +110,8 @@ func (e MessageEncoders) Encode(ctx sdk.Context, contractAddr sdk.AccAddress, co
 		return e.Distribution(contractAddr, msg.Distribution)
 	case msg.IBC != nil:
 		return e.IBC(ctx, contractAddr, contractIBCPortID, msg.IBC)
+	case msg.IBC2 != nil:
+		return e.IBC2(contractAddr, msg.IBC2)
 	case msg.Staking != nil:
 		return e.Staking(contractAddr, msg.Staking)
 	case msg.Any != nil:
@@ -327,36 +336,34 @@ func EncodeIBCMsg(portSource types.ICS20TransferPortSource) func(ctx sdk.Context
 				Memo:             msg.Transfer.Memo,
 			}
 			return []sdk.Msg{msg}, nil
-		case msg.PayPacketFee != nil:
-			fee, err := ConvertIBCFee(&msg.PayPacketFee.Fee)
-			if err != nil {
-				return nil, errorsmod.Wrap(err, "fee")
-			}
-			msg := &ibcfeetypes.MsgPayPacketFee{
-				Fee:             fee,
-				SourcePortId:    msg.PayPacketFee.PortID,
-				SourceChannelId: msg.PayPacketFee.ChannelID,
-				Signer:          sender.String(),
-				Relayers:        msg.PayPacketFee.Relayers,
-			}
-			return []sdk.Msg{msg}, nil
-		case msg.PayPacketFeeAsync != nil:
-			fee, err := ConvertIBCFee(&msg.PayPacketFeeAsync.Fee)
-			if err != nil {
-				return nil, errorsmod.Wrap(err, "fee")
-			}
-			msg := &ibcfeetypes.MsgPayPacketFeeAsync{
-				PacketId: channeltypes.PacketId{
-					PortId:    msg.PayPacketFeeAsync.PortID,
-					ChannelId: msg.PayPacketFeeAsync.ChannelID,
-					Sequence:  msg.PayPacketFeeAsync.Sequence,
-				},
-				PacketFee: ibcfeetypes.NewPacketFee(fee, sender.String(), msg.PayPacketFeeAsync.Relayers),
-			}
-			return []sdk.Msg{msg}, nil
 		default:
 			return nil, errorsmod.Wrap(types.ErrUnknownMsg, "unknown variant of IBC")
 		}
+	}
+}
+
+func EncodeIBCv2Msg(sender sdk.AccAddress, msg *wasmvmtypes.IBC2Msg) ([]sdk.Msg, error) {
+	switch {
+	case msg.SendPacket != nil:
+		var payloads []channeltypesv2.Payload
+		for _, payload := range msg.SendPacket.Payloads {
+			payloads = append(payloads, channeltypesv2.Payload{
+				SourcePort:      payload.SourcePort,
+				DestinationPort: payload.DestinationPort,
+				Version:         payload.Version,
+				Encoding:        payload.Encoding,
+				Value:           payload.Value,
+			})
+		}
+		msg := &channeltypesv2.MsgSendPacket{
+			SourceClient:     msg.SendPacket.SourceClient,
+			TimeoutTimestamp: uint64(time.Unix(0, int64(msg.SendPacket.Timeout)).Unix()),
+			Payloads:         payloads,
+			Signer:           sender.String(),
+		}
+		return []sdk.Msg{msg}, nil
+	default:
+		return nil, errorsmod.Wrap(types.ErrUnknownMsg, "unknown variant of IBCv2")
 	}
 }
 
@@ -439,24 +446,4 @@ func ConvertWasmCoinToSdkCoin(coin wasmvmtypes.Coin) (sdk.Coin, error) {
 		Amount: amount,
 	}
 	return r, r.Validate()
-}
-
-func ConvertIBCFee(fee *wasmvmtypes.IBCFee) (ibcfeetypes.Fee, error) {
-	ackFee, err := ConvertWasmCoinsToSdkCoins(fee.AckFee)
-	if err != nil {
-		return ibcfeetypes.Fee{}, err
-	}
-	recvFee, err := ConvertWasmCoinsToSdkCoins(fee.ReceiveFee)
-	if err != nil {
-		return ibcfeetypes.Fee{}, err
-	}
-	timeoutFee, err := ConvertWasmCoinsToSdkCoins(fee.TimeoutFee)
-	if err != nil {
-		return ibcfeetypes.Fee{}, err
-	}
-	return ibcfeetypes.Fee{
-		AckFee:     ackFee,
-		RecvFee:    recvFee,
-		TimeoutFee: timeoutFee,
-	}, nil
 }

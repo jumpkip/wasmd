@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	wasmvm "github.com/CosmWasm/wasmvm/v2"
-	wasmvmtypes "github.com/CosmWasm/wasmvm/v2/types"
+	wasmvm "github.com/CosmWasm/wasmvm/v3"
+	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
 	ibctransfertypes "github.com/cosmos/ibc-go/v10/modules/apps/transfer/types"
 	clienttypes "github.com/cosmos/ibc-go/v10/modules/core/02-client/types" //nolint:staticcheck
 	channeltypes "github.com/cosmos/ibc-go/v10/modules/core/04-channel/types"
@@ -725,7 +725,7 @@ func (c *ackReceiverContract) IBCPacketReceive(_ wasmvm.Checksum, _ wasmvmtypes.
 	}
 	require.NoError(c.t, src.ValidateBasic())
 
-	srcV2 := ibctransfertypes.NewFungibleTokenPacketDataV2(ibctransfertypes.Token{Denom: ibctransfertypes.NewDenom(src.Denom), Amount: src.Amount}, src.Sender, src.Receiver, src.Memo)
+	srcV2 := ibctransfertypes.NewInternalTransferRepresentation(ibctransfertypes.Token{Denom: ibctransfertypes.NewDenom(src.Denom), Amount: src.Amount}, src.Sender, src.Receiver, src.Memo)
 
 	// call original ibctransfer keeper to not copy all code into this
 	ibcPacket := toIBCPacket(packet)
@@ -745,7 +745,7 @@ func (c *ackReceiverContract) IBCPacketAck(_ wasmvm.Checksum, _ wasmvmtypes.Env,
 	if err := ibctransfertypes.ModuleCdc.UnmarshalJSON(msg.OriginalPacket.Data, &data); err != nil {
 		return nil, 0, err
 	}
-	dataV2 := ibctransfertypes.NewFungibleTokenPacketDataV2(ibctransfertypes.Token{Denom: ibctransfertypes.NewDenom(data.Denom), Amount: data.Amount}, data.Sender, data.Receiver, data.Memo)
+	dataV2 := ibctransfertypes.NewInternalTransferRepresentation(ibctransfertypes.Token{Denom: ibctransfertypes.NewDenom(data.Denom), Amount: data.Amount}, data.Sender, data.Receiver, data.Memo)
 	// call original ibctransfer keeper to not copy all code into this
 
 	var ack channeltypes.Acknowledgement
