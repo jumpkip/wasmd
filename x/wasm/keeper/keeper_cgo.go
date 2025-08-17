@@ -3,11 +3,11 @@
 package keeper
 
 import (
+	"crypto/sha256"
 	"path/filepath"
 
 	wasmvm "github.com/CosmWasm/wasmvm/v3"
 	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
-	ibcapi "github.com/cosmos/ibc-go/v10/modules/core/api"
 
 	"cosmossdk.io/collections"
 	corestoretypes "cosmossdk.io/core/store"
@@ -28,6 +28,7 @@ func NewKeeper(
 	distrKeeper types.DistributionKeeper,
 	ics4Wrapper types.ICS4Wrapper,
 	channelKeeper types.ChannelKeeper,
+	channelKeeperV2 types.ChannelKeeperV2,
 	portSource types.ICS20TransferPortSource,
 	router MessageRouter,
 	_ GRPCQueryRouter,
@@ -36,7 +37,6 @@ func NewKeeper(
 	vmConfig types.VMConfig,
 	availableCapabilities []string,
 	authority string,
-	ibcRouterV2 *ibcapi.Router,
 	opts ...Option,
 ) Keeper {
 	sb := collections.NewSchemaBuilder(storeService)
@@ -56,11 +56,11 @@ func NewKeeper(
 		propagateGovAuthorization: map[types.AuthorizationPolicyAction]struct{}{
 			types.AuthZActionInstantiate: {},
 		},
-		authority:   authority,
-		wasmLimits:  vmConfig.WasmLimits,
-		ibcRouterV2: ibcRouterV2,
+		authority:  authority,
+		txHash:     func(data []byte) []byte { sum := sha256.Sum256(data); return sum[:] },
+		wasmLimits: vmConfig.WasmLimits,
 	}
-	keeper.messenger = NewDefaultMessageHandler(keeper, router, ics4Wrapper, bankKeeper, cdc, portSource)
+	keeper.messenger = NewDefaultMessageHandler(keeper, router, ics4Wrapper, channelKeeperV2, bankKeeper, cdc, portSource)
 	keeper.wasmVMQueryHandler = DefaultQueryPlugins(bankKeeper, stakingKeeper, distrKeeper, channelKeeper, keeper)
 	preOpts, postOpts := splitOpts(opts)
 	for _, o := range preOpts {

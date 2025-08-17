@@ -10,7 +10,7 @@ import (
 // DefaultMaxQueryStackSize maximum size of the stack of recursive queries a contract can make
 const DefaultMaxQueryStackSize uint32 = 10
 
-const DefaultMaxCallDepth uint32 = 500
+const DefaultMaxCallDepth uint32 = 100
 
 // WasmEngine defines the WASM contract runtime engine.
 type WasmEngine interface {
@@ -292,6 +292,18 @@ type WasmEngine interface {
 		deserCost wasmvmtypes.UFraction,
 	) (*wasmvmtypes.IBCBasicResult, uint64, error)
 
+	IBC2PacketAck(
+		checksum wasmvm.Checksum,
+		env wasmvmtypes.Env,
+		payload wasmvmtypes.IBC2AcknowledgeMsg,
+		store wasmvm.KVStore,
+		goapi wasmvm.GoAPI,
+		querier wasmvm.Querier,
+		gasMeter wasmvm.GasMeter,
+		gasLimit uint64,
+		deserCost wasmvmtypes.UFraction,
+	) (*wasmvmtypes.IBCBasicResult, uint64, error)
+
 	// IBC2PacketReceive is available on IBC2-enabled contracts and is called when an incoming
 	// payload is received on a channel belonging to this contract
 	IBC2PacketReceive(
@@ -312,6 +324,20 @@ type WasmEngine interface {
 		checksum wasmvm.Checksum,
 		env wasmvmtypes.Env,
 		packet wasmvmtypes.IBC2PacketTimeoutMsg,
+		store wasmvm.KVStore,
+		goapi wasmvm.GoAPI,
+		querier wasmvm.Querier,
+		gasMeter wasmvm.GasMeter,
+		gasLimit uint64,
+		deserCost wasmvmtypes.UFraction,
+	) (*wasmvmtypes.IBCBasicResult, uint64, error)
+
+	// IBC2PacketSend is available on IBCv2-enabled contracts and is called to verify an
+	// outgoing packet before it is sent to another blockchain.
+	IBC2PacketSend(
+		checksum wasmvm.Checksum,
+		env wasmvmtypes.Env,
+		packet wasmvmtypes.IBC2PacketSendMsg,
 		store wasmvm.KVStore,
 		goapi wasmvm.GoAPI,
 		querier wasmvm.Querier,

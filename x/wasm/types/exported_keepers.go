@@ -141,6 +141,11 @@ type IBCContractKeeper interface {
 
 // IBC2ContractKeeper IBC2 lifecycle event handler
 type IBC2ContractKeeper interface {
+	OnAckIBC2Packet(
+		ctx sdk.Context,
+		contractAddr sdk.AccAddress,
+		msg wasmvmtypes.IBC2AcknowledgeMsg,
+	) error
 	OnRecvIBC2Packet(
 		ctx sdk.Context,
 		contractAddr sdk.AccAddress,
@@ -150,5 +155,10 @@ type IBC2ContractKeeper interface {
 		ctx sdk.Context,
 		contractAddr sdk.AccAddress,
 		msg wasmvmtypes.IBC2PacketTimeoutMsg,
+	) error
+	OnSendIBC2Packet(
+		ctx sdk.Context,
+		contractAddr sdk.AccAddress,
+		msg wasmvmtypes.IBC2PacketSendMsg,
 	) error
 }

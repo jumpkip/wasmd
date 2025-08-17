@@ -15,7 +15,6 @@ import (
 	wasmvm "github.com/CosmWasm/wasmvm/v3"
 	wasmvmtypes "github.com/CosmWasm/wasmvm/v3/types"
 	channeltypes "github.com/cosmos/ibc-go/v10/modules/core/04-channel/types"
-	ibcapi "github.com/cosmos/ibc-go/v10/modules/core/api"
 
 	"cosmossdk.io/collections"
 	corestoretypes "cosmossdk.io/core/store"
@@ -109,14 +108,14 @@ type Keeper struct {
 	// should be the x/gov module account.
 	authority string
 
+	// txHash is a function to calculate the transaction hash from the raw transaction bytes.
+	// This is used to provide the transaction hash to the wasmvm engine and currently defaults to
+	// sha256 hashing, which is the hash currently used in CometBFT:
+	// https://github.com/cometbft/cometbft/blob/v1.0.1/crypto/tmhash/hash.go#L19-L22
+	txHash func([]byte) []byte
+
 	// wasmLimits contains the limits sent to wasmvm on init
 	wasmLimits wasmvmtypes.WasmLimits
-
-	ibcRouterV2 *ibcapi.Router
-}
-
-func (k Keeper) GetIBCRouterV2() *ibcapi.Router {
-	return k.ibcRouterV2
 }
 
 func (k Keeper) getUploadAccessConfig(ctx context.Context) types.AccessConfig {
@@ -338,7 +337,7 @@ func (k Keeper) instantiate(
 	}
 
 	// prepare params for contract instantiate call
-	env := types.NewEnv(sdkCtx, contractAddress)
+	env := types.NewEnv(sdkCtx, k.txHash, contractAddress)
 	info := types.NewInfo(creator, deposit)
 
 	// create prefixed data store
@@ -378,12 +377,8 @@ func (k Keeper) instantiate(
 		ibcPort := PortIDForContract(contractAddress)
 		contractInfo.IBCPortID = ibcPort
 	}
-	if report.HasIBC2EntryPoints {
-		// register IBC v2 port
-		ibc2Port := PortIDForContractV2(contractAddress)
-		k.ibcRouterV2.AddRoute(ibc2Port, NewIBC2Handler(k))
-		contractInfo.IBC2PortID = ibc2Port
-	}
+
+	contractInfo.IBC2PortID = PortIDForContractV2(contractAddress)
 
 	// store contract before dispatch so that contract could be called back
 	historyEntry := contractInfo.InitialHistory(initMsg)
@@ -438,7 +433,7 @@ func (k Keeper) execute(ctx context.Context, contractAddress, caller sdk.AccAddr
 		}
 	}
 
-	env := types.NewEnv(sdkCtx, contractAddress)
+	env := types.NewEnv(sdkCtx, k.txHash, contractAddress)
 	info := types.NewInfo(caller, coins)
 
 	// prepare querier
@@ -513,6 +508,9 @@ func (k Keeper) migrate(
 		contractInfo.IBCPortID = ibcPort
 	}
 
+	ibc2Port := PortIDForContractV2(contractAddress)
+	contractInfo.IBC2PortID = ibc2Port
+
 	var response *wasmvmtypes.Response
 
 	// check for migrate version
@@ -549,12 +547,7 @@ func (k Keeper) migrate(
 	}
 	k.mustStoreContractInfo(ctx, contractAddress, contractInfo)
 
-	if report.HasIBC2EntryPoints && contractInfo.IBC2PortID != "" {
-		// register IBC v2 port
-		ibc2Port := PortIDForContractV2(contractAddress)
-		k.ibcRouterV2.AddRoute(ibc2Port, NewIBC2Handler(k))
-		contractInfo.IBC2PortID = ibc2Port
-	}
+	contractInfo.IBC2PortID = PortIDForContractV2(contractAddress)
 
 	sdkCtx.EventManager().EmitEvent(sdk.NewEvent(
 		types.EventTypeMigrate,
@@ -598,7 +591,7 @@ func (k Keeper) callMigrateEntrypoint(
 	setupCost := k.gasRegister.SetupContractCost(discount, len(msg))
 	sdkCtx.GasMeter().ConsumeGas(setupCost, "Loading CosmWasm module: migrate")
 
-	env := types.NewEnv(sdkCtx, contractAddress)
+	env := types.NewEnv(sdkCtx, k.txHash, contractAddress)
 
 	// prepare querier
 	querier := k.newQueryHandler(sdkCtx, contractAddress)
@@ -648,7 +641,7 @@ func (k Keeper) Sudo(ctx context.Context, contractAddress sdk.AccAddress, msg []
 
 	sdkCtx.GasMeter().ConsumeGas(setupCost, "Loading CosmWasm module: sudo")
 
-	env := types.NewEnv(sdkCtx, contractAddress)
+	env := types.NewEnv(sdkCtx, k.txHash, contractAddress)
 
 	// prepare querier
 	querier := k.newQueryHandler(sdkCtx, contractAddress)
@@ -690,7 +683,7 @@ func (k Keeper) reply(ctx sdk.Context, contractAddress sdk.AccAddress, reply was
 	replyCosts := k.gasRegister.ReplyCosts(true, reply)
 	ctx.GasMeter().ConsumeGas(replyCosts, "Loading CosmWasm module: reply")
 
-	env := types.NewEnv(ctx, contractAddress)
+	env := types.NewEnv(ctx, k.txHash, contractAddress)
 
 	// prepare querier
 	querier := k.newQueryHandler(ctx, contractAddress)
@@ -887,7 +880,7 @@ func (k Keeper) QuerySmart(ctx context.Context, contractAddr sdk.AccAddress, req
 	// prepare querier
 	querier := k.newQueryHandler(sdkCtx, contractAddr)
 
-	env := types.NewEnv(sdkCtx, contractAddr)
+	env := types.NewEnv(sdkCtx, k.txHash, contractAddr)
 	queryResult, gasUsed, qErr := k.wasmVM.Query(codeInfo.CodeHash, env, req, prefixStore, cosmwasmAPI, querier, k.gasMeter(sdkCtx), k.runtimeGasForContract(sdkCtx), costJSONDeserialization)
 	k.consumeRuntimeGas(sdkCtx, gasUsed)
 	if qErr != nil {
@@ -944,6 +937,45 @@ func (k Keeper) QueryRaw(ctx context.Context, contractAddress sdk.AccAddress, ke
 	prefixStoreKey := types.GetContractStorePrefix(contractAddress)
 	prefixStore := prefix.NewStore(runtime.KVStoreAdapter(k.storeService.OpenKVStore(ctx)), prefixStoreKey)
 	return prefixStore.Get(key)
+}
+
+func (k Keeper) QueryRawRange(ctx context.Context, contractAddress sdk.AccAddress, start, end []byte, limit uint16, reverse bool) (results []wasmvmtypes.RawRangeEntry, nextKey []byte) {
+	defer telemetry.MeasureSince(time.Now(), "wasm", "contract", "query-raw-range")
+
+	prefixStoreKey := types.GetContractStorePrefix(contractAddress)
+	prefixStore := prefix.NewStore(runtime.KVStoreAdapter(k.storeService.OpenKVStore(ctx)), prefixStoreKey)
+	var iter storetypes.Iterator
+	if reverse {
+		iter = prefixStore.ReverseIterator(start, end)
+	} else {
+		iter = prefixStore.Iterator(start, end)
+	}
+	defer iter.Close()
+
+	// Make sure to set to empty array because the contract doesn't expect a null JSON value
+	results = []wasmvmtypes.RawRangeEntry{}
+
+	var count uint16 = 0
+	for ; iter.Valid(); iter.Next() {
+		// keep track of count to honor the limit
+		if count == limit {
+			break
+		}
+		count++
+
+		// add key-value pair
+		results = append(results, wasmvmtypes.RawRangeEntry{Key: iter.Key(), Value: iter.Value()})
+	}
+
+	if iter.Valid() {
+		// if there are more results, set the next key
+		key := iter.Key()
+		nextKey = key
+	} else {
+		nextKey = nil
+	}
+
+	return results, nextKey
 }
 
 // internal helper function
@@ -1093,6 +1125,7 @@ func (k Keeper) importContractState(ctx context.Context, contractAddress sdk.Acc
 		}
 		prefixStore.Set(model.Key, model.Value)
 	}
+
 	return nil
 }
 

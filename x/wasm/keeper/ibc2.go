@@ -35,6 +35,23 @@ func (module IBC2Handler) OnSendPacket(
 	payload channeltypesv2.Payload,
 	signer sdk.AccAddress,
 ) error {
+	contractAddr, err := ContractFromPortID2(payload.SourcePort)
+	if err != nil {
+		panic(errorsmod.Wrapf(err, "Invalid contract port id"))
+	}
+
+	msg := wasmvmtypes.IBC2PacketSendMsg{
+		Payload:           newIBC2Payload(payload),
+		SourceClient:      sourceClient,
+		DestinationClient: destinationClient,
+		PacketSequence:    sequence,
+		Signer:            signer.String(),
+	}
+
+	err = module.keeper.OnSendIBC2Packet(ctx, contractAddr, msg)
+	if err != nil {
+		return errorsmod.Wrap(err, "on ibc2 send")
+	}
 	return nil
 }
 
@@ -100,7 +117,54 @@ func (module IBC2Handler) OnAcknowledgementPacket(
 	payload channeltypesv2.Payload,
 	relayer sdk.AccAddress,
 ) error {
+	contractAddr, err := ContractFromPortID2(payload.SourcePort)
+	if err != nil {
+		return errorsmod.Wrapf(err, "contract port id")
+	}
+	msg := wasmvmtypes.IBC2AcknowledgeMsg{
+		SourceClient:      sourceClient,
+		DestinationClient: destinationClient,
+		Data:              newIBC2Payload(payload),
+		Acknowledgement:   acknowledgement,
+		Relayer:           relayer.String(),
+	}
+	err = module.keeper.OnAckIBC2Packet(ctx, contractAddr, msg)
+	if err != nil {
+		return errorsmod.Wrap(err, "on ack")
+	}
 	return nil
+}
+
+func (k Keeper) OnAckIBC2Packet(
+	ctx sdk.Context,
+	contractAddr sdk.AccAddress,
+	msg wasmvmtypes.IBC2AcknowledgeMsg,
+) error {
+	defer telemetry.MeasureSince(time.Now(), "wasm", "contract", "ibc2-ack-packet")
+
+	contractInfo, codeInfo, prefixStore, err := k.contractInstance(ctx, contractAddr)
+	if err != nil {
+		return err
+	}
+
+	env := types.NewEnv(ctx, k.txHash, contractAddr)
+	querier := k.newQueryHandler(ctx, contractAddr)
+
+	gasLeft := k.runtimeGasForContract(ctx)
+	res, gasUsed, execErr := k.wasmVM.IBC2PacketAck(codeInfo.CodeHash, env, msg, prefixStore, cosmwasmAPI, querier, ctx.GasMeter(), gasLeft, costJSONDeserialization)
+	k.consumeRuntimeGas(ctx, gasUsed)
+	if execErr != nil {
+		return errorsmod.Wrap(types.ErrExecuteFailed, execErr.Error())
+	}
+	if res == nil {
+		// If this gets executed, that's a bug in wasmvm
+		return errorsmod.Wrap(types.ErrVMError, "internal wasmvm error")
+	}
+	if res.Err != "" {
+		return types.MarkErrorDeterministic(errorsmod.Wrap(types.ErrExecuteFailed, res.Err))
+	}
+
+	return k.handleIBCBasicContractResponse(ctx, contractAddr, contractInfo.IBC2PortID, res.Ok)
 }
 
 // The method calls the contract to process the incoming IBC2 packet. The contract fully owns the data processing and
@@ -120,7 +184,7 @@ func (k Keeper) OnRecvIBC2Packet(
 		}
 	}
 
-	env := types.NewEnv(ctx, contractAddr)
+	env := types.NewEnv(ctx, k.txHash, contractAddr)
 	querier := k.newQueryHandler(ctx, contractAddr)
 
 	gasLeft := k.runtimeGasForContract(ctx)
@@ -158,16 +222,6 @@ func (k Keeper) OnRecvIBC2Packet(
 	}
 
 	if data == nil {
-		// In case of lack of ack, we assume that the packet should
-		// be handled asynchronously.
-		// TODO: https://github.com/CosmWasm/wasmd/issues/2161
-		// err = k.StoreAsyncAckPacket(ctx, convertPacket(msg.Payload))
-		// if err != nil {
-		// 	return channeltypesv2.RecvPacketResult{
-		// 		Status:          channeltypesv2.PacketStatus_Failure,
-		// 		Acknowledgement: []byte(err.Error()),
-		// 	}
-		// }
 		return channeltypesv2.RecvPacketResult{
 			Status: channeltypesv2.PacketStatus_Async,
 		}
@@ -195,11 +249,46 @@ func (k Keeper) OnTimeoutIBC2Packet(
 		return err
 	}
 
-	env := types.NewEnv(ctx, contractAddr)
+	env := types.NewEnv(ctx, k.txHash, contractAddr)
 	querier := k.newQueryHandler(ctx, contractAddr)
 
 	gasLeft := k.runtimeGasForContract(ctx)
 	res, gasUsed, execErr := k.wasmVM.IBC2PacketTimeout(codeInfo.CodeHash, env, msg, prefixStore, cosmwasmAPI, querier, ctx.GasMeter(), gasLeft, costJSONDeserialization)
+	k.consumeRuntimeGas(ctx, gasUsed)
+	if execErr != nil {
+		return errorsmod.Wrap(types.ErrExecuteFailed, execErr.Error())
+	}
+	if res == nil {
+		// If this gets executed, that's a bug in wasmvm
+		return errorsmod.Wrap(types.ErrVMError, "internal wasmvm error")
+	}
+	if res.Err != "" {
+		return types.MarkErrorDeterministic(errorsmod.Wrap(types.ErrExecuteFailed, res.Err))
+	}
+
+	return k.handleIBCBasicContractResponse(ctx, contractAddr, contractInfo.IBC2PortID, res.Ok)
+}
+
+// OnSendIBC2Packet calls the contract to inform it that the packet was sent from
+// the source port assigned to this contract. The contract should handle this at
+// the application level and verify the message.
+func (k Keeper) OnSendIBC2Packet(
+	ctx sdk.Context,
+	contractAddr sdk.AccAddress,
+	msg wasmvmtypes.IBC2PacketSendMsg,
+) error {
+	defer telemetry.MeasureSince(time.Now(), "wasm", "contract", "ibc2-send-packet")
+
+	contractInfo, codeInfo, prefixStore, err := k.contractInstance(ctx, contractAddr)
+	if err != nil {
+		return err
+	}
+
+	env := types.NewEnv(ctx, k.txHash, contractAddr)
+	querier := k.newQueryHandler(ctx, contractAddr)
+
+	gasLeft := k.runtimeGasForContract(ctx)
+	res, gasUsed, execErr := k.wasmVM.IBC2PacketSend(codeInfo.CodeHash, env, msg, prefixStore, cosmwasmAPI, querier, ctx.GasMeter(), gasLeft, costJSONDeserialization)
 	k.consumeRuntimeGas(ctx, gasUsed)
 	if execErr != nil {
 		return errorsmod.Wrap(types.ErrExecuteFailed, execErr.Error())
