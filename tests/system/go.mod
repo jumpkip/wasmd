@@ -1,6 +1,6 @@
 module github.com/CosmWasm/wasmd/tests/system
 
-go 1.23.6
+go 1.24
 
 require (
 	github.com/cosmos/cosmos-proto v1.0.0-beta.5 // indirect
@@ -81,7 +81,7 @@ require (
 	github.com/go-kit/kit v0.13.0 // indirect
 	github.com/go-kit/log v0.2.1 // indirect
 	github.com/go-logfmt/logfmt v0.6.0 // indirect
-	github.com/go-viper/mapstructure/v2 v2.3.0 // indirect
+	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
 	github.com/gogo/googleapis v1.4.1 // indirect
 	github.com/golang/glog v1.2.4 // indirect
